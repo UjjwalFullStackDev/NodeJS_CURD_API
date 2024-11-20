@@ -2,20 +2,37 @@ import express from 'express'
 const app = express()
 import 'dotenv/config'
 import mongoose from 'mongoose'
+import bcrypt from 'bcrypt'
+import multer from 'multer'
+import path from 'path'
+
 
 const port = process.env.PORT || 4000
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
+
+// multer 
+const publicPath = path.join("public/")
+const storage = multer.diskStorage({
+    destination: function (req, file, cb) {
+        cb(null, publicPath);
+    },
+    filename: function (req, file, cb) {
+      cb(null, file.originalname)
+    }
+  })
+  
+  const upload = multer({ storage: storage })
 
 // db connect 
 
 
 async function dbConnection() {
     const dbConnect = process.env.DB
+    if(!dbConnect) {
+        console.log("missing connection string");
+    }
     try {
-        if(!dbConnect) {
-            console.log("missing connection string");
-        }
         const db = await mongoose.connect(dbConnect)
         if(!db) {
             console.log("db not connected");
@@ -26,15 +43,16 @@ async function dbConnection() {
         throw new Error(error)
     }
 }
-dbConnection()
+dbConnection();
 
 
 // Create model
 const userModel = new mongoose.Schema({
+        userProfile: {type: String, required: true},
         username: { type: String, required: true },
         useremail: { type: String, required: true, unique: true },
         mobile: { type: String },
-        password: { type: String },
+        password: { type: String, minLength: 3 }
 },
 {timestamps: true})
 
@@ -42,15 +60,26 @@ const User = mongoose.model("data",userModel)
 
 
 // Create APIs     Post data 
-app.post("/createuser/", async (req, res) => {
-    const {username, useremail, mobile, password} = req.body
-    try {
-        const createUser = new User({ username, useremail, mobile, password });
-        const saveUser = await createUser.save();
-        res.status(201).json({ message: "User created successfully", data: saveUser });
-    } catch (error) {
-        console.error("Error creating user:", error.message);
-        res.status(500).json({ message: "Something went wrong", error: error.message });
+app.post("/createuser/",upload.single("userProfile"), async (req, res) => {
+    const {username, useremail, mobile, password} = req.body;
+    const userProfile = req.file?.path;
+    if(!userProfile) {
+        return res.status(400).json({ message: "Profile picture is required" });
+    }
+    if(username && useremail && mobile && password) {
+        try {
+            const salt = await bcrypt.genSalt(12)
+            const hashPass = await bcrypt.hash(password,salt)
+
+            const createUser = new User({userProfile, username, useremail, mobile, password: hashPass, });
+            const saveUser = await createUser.save();
+            res.status(201).json({ message: "User created successfully", data: saveUser });
+        } catch (error) {
+            console.error("Error creating user:", error.message);
+            res.status(500).json({ message: "Something went wrong", error: error.message });
+        }
+    }else{
+        return res.status(400).json({ message: "All fields are required"});
     }
 })
 
